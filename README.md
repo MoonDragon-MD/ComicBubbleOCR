@@ -72,10 +72,15 @@ NB-2: The option “Automatically anchor text” is to make the text layer a non
 ### Screenshots
 
 ENG
+
 ![alt text](https://github.com/MoonDragon-MD/ComicBubbleOCR/blob/main/img/1.jpg?raw=true)
+
 result
+
 ![alt text](https://github.com/MoonDragon-MD/ComicBubbleOCR/blob/main/img/2.jpg?raw=true)
+
 ITA
+
 ![alt text](https://github.com/MoonDragon-MD/ComicBubbleOCR/blob/main/img/3.jpg?raw=true)
 
 ### Info
