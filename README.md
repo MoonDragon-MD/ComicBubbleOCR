@@ -28,6 +28,8 @@ curl https://bootstrap.pypa.io/pip/2.7/get-pip.py -o get-pip.py
 python2.7 get-pip.py
 python2.7 -m pip install requests Pillow 
 ```
+- LibreTranslate (Argos) set to localhost:5000 [LibreTranslate on Docker](https://hub.docker.com/r/libretranslate/libretranslate)
+
 I also set google translation but since the library is old it will not work,
 
 I left the option for a future (for new GIMP versions with python3 the library works)
