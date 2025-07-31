@@ -3,6 +3,7 @@
 from gimpfu import *
 import subprocess
 import os
+import configparser # Per memorizzare le impostazioni nel file ini
 import tempfile
 import Tkinter as tk
 import tkMessageBox
@@ -20,7 +21,7 @@ locale.setlocale(locale.LC_ALL, 'C')  # Forza la localizzazione inglese per evit
 
 
 # ComicBubbleOCR by MoonDragon
-# V. 1.0 rev.50
+# V. 1.1 rev.17
 # Sito web: https://github.com/MoonDragon-MD/ComicBubbleOCR
 
 ## Dipendenze
@@ -81,6 +82,23 @@ psm_options = [
     ("13", "Raw line, bypassing hacks")
 ]
 
+# Percorso del file di configurazione
+CONFIG_FILE = "/tmp/ComicBubbleOCR.ini"
+
+# Impostazioni predefinite
+DEFAULT_SETTINGS = {
+    "lang_input": "auto",
+    "lang_output": "it",
+    "psm_var": "3",
+    "psm_display": psm_options[3][1],
+    "preprocess_var": "none",
+    "auto_color_var": "True",
+    "invert_colors_var": "False",
+    "lowercase_translate_var": "False",
+    "translator_var": "libre",
+    "auto_anchor_var": "False"
+}
+
 # Opzioni di preelaborazione del testo
 preprocess_options = [
     ("none", "Nessuna pre-elaborazione"),
@@ -89,6 +107,53 @@ preprocess_options = [
     ("remove_duplicate_returns", "Rimuovere a-capo doppi"),
     ("remove_duplicate_spaces", "Rimuovere gli spazi doppi")
 ]
+
+# Gestiscono il salvataggio delle mpostazioni nel file ini
+def load_settings():
+    config = configparser.ConfigParser()
+    if not os.path.exists(CONFIG_FILE):
+        print("File di configurazione %s non trovato, creazione con valori predefiniti" % CONFIG_FILE)
+        config['Settings'] = DEFAULT_SETTINGS
+        try:
+            with open(CONFIG_FILE, 'w') as configfile:
+                config.write(configfile)
+        except Exception as e:
+            print("Errore nella creazione del file di configurazione: %s" % str(e))
+            return DEFAULT_SETTINGS
+    try:
+        config.read(CONFIG_FILE)
+        settings = dict(config['Settings'])
+        # Converti stringhe booleane in valori booleani
+        settings['auto_color_var'] = config.getboolean('Settings', 'auto_color_var')
+        settings['invert_colors_var'] = config.getboolean('Settings', 'invert_colors_var')
+        settings['lowercase_translate_var'] = config.getboolean('Settings', 'lowercase_translate_var')
+        settings['auto_anchor_var'] = config.getboolean('Settings', 'auto_anchor_var')
+        print("Impostazioni caricate da %s: %s" % (CONFIG_FILE, settings))
+        return settings
+    except Exception as e:
+        print("Errore nella lettura del file di configurazione: %s, uso valori predefiniti" % str(e))
+        return DEFAULT_SETTINGS
+    
+def save_settings(settings):
+    config = configparser.ConfigParser()
+    config['Settings'] = {
+        'lang_input': settings['lang_input'],
+        'lang_output': settings['lang_output'],
+        'psm_var': settings['psm_var'],
+        'psm_display': settings['psm_display'],
+        'preprocess_var': settings['preprocess_var'],
+        'auto_color_var': str(settings['auto_color_var']),
+        'invert_colors_var': str(settings['invert_colors_var']),
+        'lowercase_translate_var': str(settings['lowercase_translate_var']),
+        'translator_var': settings['translator_var'],
+        'auto_anchor_var': str(settings['auto_anchor_var'])
+    }
+    try:
+        with open(CONFIG_FILE, 'w') as configfile:
+            config.write(configfile)
+        print("Impostazioni salvate in %s: %s" % (CONFIG_FILE, settings))
+    except Exception as e:
+        print("Errore nel salvataggio del file di configurazione: %s" % str(e))
 
 # Funzione di preelaborazione
 def preprocess_text(text, preprocess_mode):
@@ -565,14 +630,14 @@ def export_image_selectioned(image, drawable, name_layer, auto_color=False, gui_
                             print("Colore campionato a (%d, %d): %s" % (x, y, tuple(pixel[1][:3])))
             if colors:
                 color_counts = Counter(colors)
-                # Filter colors with at least 10% frequency
+                # Filter colors with at least 5% frequency
                 total_samples = len(colors)
-                min_count = total_samples * 0.1  # 10% threshold
+                min_count = total_samples * 0.05  # 5% per includere #f3e6d3
                 top_colors = [(color, count) for color, count in color_counts.most_common() if count >= min_count]
                 if len(top_colors) >= 1:
                     color_balloon = top_colors[0][0]  # Colore più comune per lo sfondo
                     brightness = calculate_brightness(color_balloon)
-                    if len(top_colors) == 2:
+                    if len(top_colors) >= 2:
                         count1, count2 = top_colors[0][1], top_colors[1][1]
                         percent1, percent2 = (count1 / float(total_samples)) * 100, (count2 / float(total_samples)) * 100
                         if abs(percent1 - percent2) <= 5:  # Similar frequencies (50% ± 5%), show popup
@@ -590,19 +655,30 @@ def export_image_selectioned(image, drawable, name_layer, auto_color=False, gui_
                             text_color = top_colors[1][0]  # Use second color for text
                             print("Due colori rilevati, sfondo: %s (%.1f%%), testo: %s (%.1f%%)" % (color_balloon, percent1, text_color, percent2))
                     else:
-                        # Uno o più di due colori: colore del testo a base di luminosità
+                        # Un solo colore rilevato
                         text_color = (0, 0, 0) if brightness > 128 else (255, 255, 255)
-                        print("Un solo colore o più colori rilevati, sfondo: %s, luminosità: %f, testo: %s" % (color_balloon, brightness, text_color))
+                        print("Un solo colore rilevato, sfondo: %s, luminosità: %f, testo: %s" % (color_balloon, brightness, text_color))
+
+                    # Verifica se colore sfondo e colore testo sono uguali o troppo simili
+                    def color_distance(c1, c2):
+                        return ((c1[0] - c2[0])**2 + (c1[1] - c2[1])**2 + (c1[2] - c2[2])**2)**0.5
+
+                    if color_balloon == text_color or color_distance(color_balloon, text_color) < 20:  # Soglia di similarità
+                        print("Avviso: Colore sfondo (%s) e colore testo (%s) sono uguali o troppo simili" % (color_balloon, text_color))
+                        text_color = (0, 0, 0) if brightness > 128 else (255, 255, 255)
+                        print("Colore testo modificato in base alla luminosità: %s" % str(text_color))
                 else:
-                    # Fallback if no colors meet the 10% threshold
+                    # Fallback se non ci sono colori validi
                     color_balloon = top_colors[0][0] if top_colors else (255, 255, 255)
                     brightness = calculate_brightness(color_balloon)
                     text_color = (0, 0, 0) if brightness > 128 else (255, 255, 255)
-                    print("Colore selezionato: %s, luminosità: %f, testo: %s" % (color_balloon, brightness, text_color))
+                    print("Nessun colore valido con frequenza >= 5%, uso sfondo: %s, testo: %s" % (color_balloon, text_color))
             else:
                 print("Nessun colore valido campionato, uso bianco di default")
                 color_balloon = (255, 255, 255)
+                brightness = calculate_brightness(color_balloon)
                 text_color = (0, 0, 0)
+                print("Colore sfondo finale: %s, colore testo finale: %s" % (color_balloon, text_color))
             print("Colore sfondo finale: %s, colore testo finale: %s" % (color_balloon, text_color))
 
         # 8. Ottimizza la selezione per riempire la bolla
@@ -610,17 +686,49 @@ def export_image_selectioned(image, drawable, name_layer, auto_color=False, gui_
         temp_mask = pdb.gimp_selection_save(image)
         temp_mask.name = "Temp_Mask"
         print("Canale Temp_Mask creato")
-        for _ in range(3):
-            pdb.plug_in_gauss(image, temp_mask, 50.0, 50.0, 0)
+        for _ in range(2):  # Ridotto a 2 iterazioni
+            # Applica sfocatura e ottimizzazione
+            pdb.plug_in_gauss(image, temp_mask, 10.0, 10.0, 0)  # Raggio ridotto a 10.0
         print("Esecuzione pdb.plug_in_gauss (iterativa)")
         pdb.gimp_drawable_threshold(temp_mask, HISTOGRAM_VALUE, 0.1, 1.0)
         pdb.gimp_image_select_item(image, 2, temp_mask)
-        pdb.gimp_selection_grow(image, 5)
+        pdb.gimp_selection_grow(image, 3)  # Espansione ridotta a 3 pixel
         pdb.gimp_selection_shrink(image, 2)
         pdb.gimp_selection_feather(image, 2.0)
         optimized_selection = pdb.gimp_selection_save(image)
         optimized_selection.name = "Optimized_Selection"
         print("Selezione ottimizzata salvata, vuota: %s" % pdb.gimp_selection_is_empty(image))
+
+        # 8.1 Riduci la selezione del 4% per compensare lo sbordamento
+        pdb.gimp_image_select_item(image, 2, optimized_selection)
+        bounds = pdb.gimp_selection_bounds(image)[1:5]
+        x1, y1, x2, y2 = bounds
+        width = x2 - x1
+        height = y2 - y1
+        shrink_amount = max(3, int(min(width, height) * 0.04))  # 4% con minimo 3 pixel
+        if shrink_amount > 0:
+            pdb.gimp_selection_shrink(image, shrink_amount)
+            print("Selezione ridotta del 4%% (shrink_amount=%d)" % shrink_amount)
+        else:
+            print("Shrink amount è 0, nessuna riduzione applicata")
+        optimized_selection_reduced = pdb.gimp_selection_save(image)
+        optimized_selection_reduced.name = "Optimized_Selection_Reduced"
+        print("Selezione ridotta salvata, vuota: %s" % pdb.gimp_selection_is_empty(image))
+
+        # Debug visivo della selezione ridotta
+        if ENABLE_DEBUG:
+            temp_selection_image = pdb.gimp_image_new(width, height, RGB)
+            temp_layer = pdb.gimp_layer_new(temp_selection_image, width, height, RGBA_IMAGE, "Selection_Debug", 100, LAYER_MODE_NORMAL)
+            pdb.gimp_image_insert_layer(temp_selection_image, temp_layer, None, 0)
+            pdb.gimp_drawable_fill(temp_layer, FILL_TRANSPARENT)
+            pdb.gimp_image_select_item(image, 2, optimized_selection_reduced)
+            pdb.gimp_context_set_background(gimpcolor.RGB(1.0, 1.0, 1.0))
+            pdb.gimp_drawable_edit_fill(temp_layer, FILL_BACKGROUND)
+            debug_path = os.path.join(tempfile.gettempdir(), "debug_selection_reduced.png")
+            pdb.file_png_save(temp_selection_image, temp_layer, debug_path, debug_path, 0, 9, 1, 1, 1, 1, 1)
+            temp_files.append(debug_path)
+            print("Selezione ridotta salvata per debug: %s" % debug_path)
+            pdb.gimp_image_delete(temp_selection_image)
 
         # 9. Crea e riempi un nuovo layer per la bolla
         timestamp = time.strftime("%Y%m%d_%H%M%S")
@@ -635,7 +743,7 @@ def export_image_selectioned(image, drawable, name_layer, auto_color=False, gui_
         print("Creazione layer GlobeText vuoto")
 
         # 10. Riempi la selezione con il colore di sfondo
-        pdb.gimp_image_select_item(image, 2, optimized_selection)
+        pdb.gimp_image_select_item(image, 2, optimized_selection_reduced)  # Usa la selezione ridotta
         pdb.gimp_context_set_background(gimpcolor.RGB(*[c / 255.0 for c in color_balloon]))
         pdb.gimp_drawable_edit_fill(layer_globe_text, FILL_BACKGROUND)
         print("Riempimento base con colore: %s" % str(color_balloon))
@@ -730,14 +838,14 @@ def export_image_selectioned(image, drawable, name_layer, auto_color=False, gui_
                     print("Passata %d basso-alto completata a x=%d" % (pass_num, col_x))
 
         print("Riempimento finale con selezione ottimizzata")
-        pdb.gimp_image_select_item(image, 2, optimized_selection)
+        pdb.gimp_image_select_item(image, 2, optimized_selection_reduced)
         pdb.gimp_drawable_edit_fill(layer_globe_text, FILL_BACKGROUND)
 
         # 11. Sfoca il layer e applica la maschera
         print("Applicazione sfocatura al layer GlobeText")
         pdb.plug_in_gauss(image, layer_globe_text, 10.0, 10.0, 0)
-        pdb.gimp_image_select_item(image, 2, optimized_selection)
-        pdb.gimp_selection_shrink(image, 3)
+        pdb.gimp_image_select_item(image, 2, optimized_selection_reduced)
+        pdb.gimp_selection_shrink(image, 2)
         layer_mask = pdb.gimp_layer_create_mask(layer_globe_text, ADD_MASK_SELECTION)
         pdb.gimp_layer_add_mask(layer_globe_text, layer_mask)
         pdb.plug_in_gauss(image, layer_mask, 5.0, 5.0, 0)
@@ -746,7 +854,7 @@ def export_image_selectioned(image, drawable, name_layer, auto_color=False, gui_
 
         # 10.bis Applicazione riempimento addizionale con selezione ridotta del 10%
         print("Applicazione riempimento addizionale con selezione ridotta del 10%%")
-        pdb.gimp_image_select_item(image, 2, optimized_selection)
+        pdb.gimp_image_select_item(image, 2, optimized_selection_reduced)
         bounds = pdb.gimp_selection_bounds(image)[1:5]
         x1, y1, x2, y2 = bounds
         width = x2 - x1
@@ -767,6 +875,12 @@ def export_image_selectioned(image, drawable, name_layer, auto_color=False, gui_
         else:
             print("Shrink amount è 0, nessun riempimento addizionale")
 
+        # Riempimento finale per uniformità
+        pdb.gimp_image_select_item(image, 2, optimized_selection_reduced)
+        pdb.gimp_context_set_background(gimpcolor.RGB(*[c / 255.0 for c in color_balloon]))
+        pdb.gimp_drawable_edit_fill(layer_globe_text, FILL_BACKGROUND)
+        print("Riempimento finale completato")
+
         # 12. Verifica il contenuto del layer
         center_x = x1 + (x2 - x1) // 2
         center_y = y1 + (y2 - y1) // 2
@@ -782,11 +896,13 @@ def export_image_selectioned(image, drawable, name_layer, auto_color=False, gui_
     finally:
         # Pulizia
         if 'original_selection' in locals() and pdb.gimp_item_is_valid(original_selection):
-            pdb.gimp_image_remove_channel(image, original_selection)
+            pdb.gimp_image_remove_channel(image, original_selection) # potrei anche commentarlo in caso se ho problemi con il riempimento
         if 'temp_mask' in locals() and pdb.gimp_item_is_valid(temp_mask):
             pdb.gimp_image_remove_channel(image, temp_mask)
         if 'optimized_selection' in locals() and pdb.gimp_item_is_valid(optimized_selection):
             pdb.gimp_image_remove_channel(image, optimized_selection)
+        if 'optimized_selection_reduced' in locals() and pdb.gimp_item_is_valid(optimized_selection_reduced):
+            pdb.gimp_image_remove_channel(image, optimized_selection_reduced)
         if 'new_layer' in locals() and pdb.gimp_item_is_valid(new_layer):
             pdb.gimp_image_remove_layer(image, new_layer)
         pdb.gimp_selection_none(image)
@@ -844,7 +960,7 @@ class TranslationGUI(tk.Tk):
     def __init__(self, image, drawable):
         tk.Tk.__init__(self)
         self.title("ComicBubbleOCR")
-        self.geometry("600x773")
+        self.geometry("600x775")
         self.image = image
         self.drawable = drawable
         self.translated_text = ""
@@ -853,48 +969,49 @@ class TranslationGUI(tk.Tk):
         self.color_balloon = None
         self.unique_layer_name = None
         self.text_color = (0, 0, 0)
+        self.settings = load_settings()  # Carica le impostazioni dal file ini
         self.init_ui()
 
     def init_ui(self):
         tk.Label(self, text="Lingua di input (3 lettere):").pack()
         self.lang_input = tk.Entry(self)
-        self.lang_input.insert(0, "auto")
+        self.lang_input.insert(0, self.settings["lang_input"])
         self.lang_input.pack()
 
         tk.Label(self, text="Lingua di output (2 lettere):").pack()
         self.lang_output = tk.Entry(self)
-        self.lang_output.insert(0, "it")
+        self.lang_output.insert(0, self.settings["lang_output"])
         self.lang_output.pack()
 
         tk.Label(self, text="Modalità PSM di Tesseract:").pack()
-        self.psm_var = tk.StringVar(value="3")
-        self.psm_display = tk.StringVar(value=psm_options[3][1])
+        self.psm_var = tk.StringVar(value=self.settings["psm_var"])
+        self.psm_display = tk.StringVar(value=self.settings["psm_display"])
         tk.OptionMenu(self, self.psm_display, *[opt[1] for opt in psm_options],
                       command=self.update_psm_selection).pack()
 
         tk.Label(self, text="Pre-elaborazione del testo:").pack()
-        self.preprocess_var = tk.StringVar(value="none")
+        self.preprocess_var = tk.StringVar(value=self.settings["preprocess_var"])
         tk.OptionMenu(self, self.preprocess_var, *[opt[1] for opt in preprocess_options],
                       command=self.update_preprocess_selection).pack()
 
-        self.auto_color_var = tk.BooleanVar(value=True)
+        self.auto_color_var = tk.BooleanVar(value=self.settings["auto_color_var"])
         tk.Checkbutton(self, text="Rileva automaticamente il colore di sfondo",
                        variable=self.auto_color_var).pack()
 
-        self.invert_colors_var = tk.BooleanVar(value=False)
+        self.invert_colors_var = tk.BooleanVar(value=self.settings["invert_colors_var"])
         tk.Checkbutton(self, text="Inverti colori per Tesseract (testo chiaro su sfondo scuro)",
                        variable=self.invert_colors_var).pack()
-        
-        self.lowercase_translate_var = tk.BooleanVar(value=False)
-        tk.Checkbutton(self, text="Traduci in minuscolo e poi converti in maiuscolo", 
+
+        self.lowercase_translate_var = tk.BooleanVar(value=self.settings["lowercase_translate_var"])
+        tk.Checkbutton(self, text="Traduci in minuscolo e poi converti in maiuscolo",
                        variable=self.lowercase_translate_var).pack()
 
         tk.Label(self, text="Traduttore:").pack()
-        self.translator_var = tk.StringVar(value="libre")
+        self.translator_var = tk.StringVar(value=self.settings["translator_var"])
         tk.Radiobutton(self, text="LibreTranslate", variable=self.translator_var, value="libre").pack()
         tk.Radiobutton(self, text="Google Translate (Al momento non funziona)", variable=self.translator_var, value="google").pack()
 
-        self.auto_anchor_var = tk.BooleanVar(value=False)
+        self.auto_anchor_var = tk.BooleanVar(value=self.settings["auto_anchor_var"])
         tk.Checkbutton(self, text="Ancora automaticamente il testo", variable=self.auto_anchor_var).pack()
 
         self.process_button = tk.Button(self, text="Processa selezione", command=self.process_image)
@@ -913,6 +1030,8 @@ class TranslationGUI(tk.Tk):
 
         self.save_button = tk.Button(self, text="Applica a GIMP", command=self.apply_to_gimp)
         self.save_button.pack()
+
+        tk.Label(self, text="V. 1.1 rev.17 by MoonDragon").pack()
 
     def update_psm_selection(self, value):
         for opt in psm_options:
@@ -1036,7 +1155,21 @@ class TranslationGUI(tk.Tk):
             self.text_display.delete(1.0, tk.END)
             self.text_display.insert(tk.END, self.translated_text)
             tkMessageBox.showinfo("Info", "Elaborazione completata. Modifica il testo OCR o tradotto se necessario.")
-            tk.Label(self, text="V. 1.0 rev.50 by MoonDragon").pack()
+
+            # Salva le impostazioni
+            self.settings.update({
+                "lang_input": self.lang_input.get().strip().lower(),
+                "lang_output": self.lang_output.get().strip().lower(),
+                "psm_var": self.psm_var.get(),
+                "psm_display": self.psm_display.get(),
+                "preprocess_var": self.preprocess_var.get(),
+                "auto_color_var": self.auto_color_var.get(),
+                "invert_colors_var": self.invert_colors_var.get(),
+                "lowercase_translate_var": self.lowercase_translate_var.get(),
+                "translator_var": self.translator_var.get(),
+                "auto_anchor_var": self.auto_anchor_var.get()
+            })
+            save_settings(self.settings)
 
         except Exception as e:
             print("Errore in process_image: %s" % str(e))
@@ -1072,58 +1205,198 @@ class TranslationGUI(tk.Tk):
                 self.destroy()
                 return
 
-            width = x2 - x1
-            height = y2 - y1
-            font_size = 20
-            font = "Sans"  # Font generico per evitare problemi
-            max_attempts = 10
-            padding = 10
+            # Calcola il rettangolo inscritto (riduci del 5% per i bordi con un minimo di 5 pixel)
+            margin = 0.05  # 5% di margine
+            fixed_margin = 5  # Margine fisso in pixel
+            inscribed_x1 = x1 + max(fixed_margin, (x2 - x1) * margin)
+            inscribed_y1 = y1 + max(fixed_margin, (y2 - y1) * margin)
+            inscribed_x2 = x2 - max(fixed_margin, (x2 - x1) * margin)
+            inscribed_y2 = y2 - max(fixed_margin, (y2 - y1) * margin)
+            inscribed_width = inscribed_x2 - inscribed_x1
+            inscribed_height = inscribed_y2 - inscribed_y1
+            print("Rettangolo inscritto calcolato: x1=%d, y1=%d, x2=%d, y2=%d, larghezza=%d, altezza=%d" % 
+                  (inscribed_x1, inscribed_y1, inscribed_x2, inscribed_y2, inscribed_width, inscribed_height))
+            print("Testo da applicare: '%s'" % text)
 
-            print("Creazione layer di testo con font: %s, dimensione: %d" % (font, font_size))
+            # Parametri del font
+            font = "Sans"  # Font principale
+            fallback_font = "Arial"  # Font di fallback
+            min_font_size = 6
+            max_font_size = 40  # Ridotto per convergere su valori realistici
+            reference_font_size = 10  # Font size di riferimento per stime
+            interlinea_factor = 1.3  # Valore fisso calibrato per Sans
+
+            # Verifica disponibilità del font
             try:
-                text_width, text_height, _, _ = pdb.gimp_text_get_extents_fontname(text, font_size, PIXELS, font)
-                print("Dimensioni testo calcolate: larghezza=%d, altezza=%d, font_size=%d" % (text_width, text_height, font_size))
-                for _ in range(max_attempts):
-                    if text_width <= (width - padding) and text_height <= (height - padding):
-                        break
-                    font_size -= 2
-                    if font_size < 8:
-                        font_size = 8
-                        break
-                    text_width, text_height, _, _ = pdb.gimp_text_get_extents_fontname(text, font_size, PIXELS, font)
-                print("Dimensioni testo finali: larghezza=%d, altezza=%d, font_size=%d" % (text_width, text_height, font_size))
+                fonts = pdb.gimp_fonts_get_list(font)
+                if not fonts or not any(font.lower() in f.lower() for f in fonts[1]):
+                    print("Font '%s' non trovato, uso fallback '%s'" % (font, fallback_font))
+                    font = fallback_font
             except Exception as e:
-                print("Errore nel calcolo delle dimensioni del testo: %s" % str(e))
-                tkMessageBox.showerror("Errore", "Errore nel calcolo delle dimensioni del testo: %s" % str(e))
-                self.destroy()
-                return
+                print("Errore nella verifica del font: %s, uso fallback '%s'" % (str(e), fallback_font))
+                font = fallback_font
+            print("Font selezionato: %s" % font)
 
+            # Funzione per ottenere le dimensioni del testo
+            def get_text_extents(text, font_size):
+                try:
+                    width, height, _, _ = pdb.gimp_text_get_extents_fontname(text, font_size, PIXELS, font)
+                    print("get_text_extents: testo='%s', font_size=%d, width=%d, height=%d" % (text, font_size, width, height))
+                    return width, height
+                except Exception as e:
+                    print("Errore in get_text_extents per testo='%s', font_size=%d: %s" % (text, font_size, str(e)))
+                    return 0, 0
+
+            # Funzione per stimare l'altezza di una riga
+            def get_line_height(font_size):
+                try:
+                    sample_text = "Sample Text"  # Testo rappresentativo
+                    _, height = get_text_extents(sample_text, font_size)
+                    if height == 0:
+                        print("Altezza zero per testo di prova, uso fallback: %d * 1.3" % font_size)
+                        return font_size * 1.3
+                    estimated_height = height / 2  # Approssimazione per una riga
+                    print("get_line_height: font_size=%d, estimated_height=%f" % (font_size, estimated_height))
+                    return estimated_height
+                except Exception as e:
+                    print("Errore in get_line_height per font_size=%d: %s" % (font_size, str(e)))
+                    return font_size * 1.3
+
+            # Usa interlinea_factor fisso per evitare problemi
+            print("Fattore interlinea per %s: %f" % (font, interlinea_factor))
+
+            # Funzione per stimare il numero di righe necessarie
+            def estimate_num_lines(text, font_size, box_width):
+                words = text.split()
+                current_line = ""
+                num_lines = 1
+                for word in words:
+                    test_line = current_line + word + " " if current_line else word + " "
+                    line_width, _ = get_text_extents(test_line, font_size)
+                    print("estimate_num_lines: test_line='%s', line_width=%d, box_width=%d" % 
+                          (test_line, line_width, box_width * 0.75))
+                    if line_width > box_width * 0.75:  # Margine di sicurezza del 25%
+                        if current_line:
+                            num_lines += 1
+                            current_line = word + " "
+                            print("Nuova riga: %d, corrente='%s'" % (num_lines, current_line))
+                        else:
+                            num_lines += 1
+                            current_line = ""
+                            print("Nuova riga per parola lunga: %d" % num_lines)
+                    else:
+                        current_line = test_line
+                if current_line:
+                    line_width, _ = get_text_extents(current_line, font_size)
+                    if line_width > 0:
+                        num_lines += 1
+                        print("Aggiunta riga finale per '%s', num_lines=%d" % (current_line, num_lines))
+                return max(1, num_lines)
+
+            # Crea un layer di testo con un box fisso
             try:
-                text_layer = pdb.gimp_text_fontname(self.image, self.drawable, x1, y1, text, -1, True, font_size, PIXELS, font)
+                text_layer = pdb.gimp_text_layer_new(self.image, text, font, reference_font_size, PIXELS)
                 if not text_layer:
                     raise Exception("Impossibile creare il layer di testo")
-                text_layer.name = "Text_" + self.unique_layer_name.split("_")[1]  # Usa solo il timestamp
-                print("Layer di testo creato: %s" % text_layer.name)
+                pdb.gimp_image_insert_layer(self.image, text_layer, None, 0)
+                text_layer.name = "Text_" + self.unique_layer_name.split("_")[1]
+                print("Layer di testo creato: %s con font_size=%d" % (text_layer.name, reference_font_size))
             except Exception as e:
-                print("Errore in apply_to_gimp: Impossibile creare il layer di testo: %s" % str(e))
-                tkMessageBox.showerror("Errore", "Impossibile creare il layer di testo: %s" % str(e))
+                print("Errore nella creazione del layer di testo: %s" % str(e))
+                tkMessageBox.showerror("Errore", "Errore nella creazione del layer di testo: %s" % str(e))
                 self.destroy()
                 return
 
+            # Imposta il box di testo
             try:
+                pdb.gimp_text_layer_set_text(text_layer, text)
+                pdb.gimp_text_layer_resize(text_layer, inscribed_width, inscribed_height)
+                pdb.gimp_layer_set_offsets(text_layer, inscribed_x1, inscribed_y1)
                 pdb.gimp_text_layer_set_justification(text_layer, TEXT_JUSTIFY_CENTER)
                 pdb.gimp_text_layer_set_color(text_layer, gimpcolor.RGB(*[c / 255.0 for c in self.text_color]))
-                text_width, text_height, _, _ = pdb.gimp_text_get_extents_fontname(text, font_size, PIXELS, font)
-                offset_x = x1 + (width - text_width) // 2
-                offset_y = y1 + (height - text_height) // 2
-                pdb.gimp_layer_set_offsets(text_layer, offset_x, offset_y)
-                print("Testo posizionato a: x=%d, y=%d" % (offset_x, offset_y))
+                print("Box di testo impostato: larghezza=%d, altezza=%d, posizione: x=%d, y=%d" % 
+                      (inscribed_width, inscribed_height, inscribed_x1, inscribed_y1))
             except Exception as e:
-                print("Errore nel posizionamento del testo: %s" % str(e))
-                tkMessageBox.showerror("Errore", "Errore nel posizionamento del testo: %s" % str(e))
+                print("Errore nell'impostazione del box di testo: %s" % str(e))
+                tkMessageBox.showerror("Errore", "Errore nell'impostazione del box di testo: %s" % str(e))
                 self.destroy()
                 return
 
+            # Funzione per verificare se il testo si adatta al box
+            def text_fits_in_box(text_layer, font_size):
+                try:
+                    pdb.gimp_text_layer_set_font_size(text_layer, font_size, PIXELS)
+                    temp_layer = pdb.gimp_layer_new_from_drawable(text_layer, self.image)
+                    pdb.gimp_image_insert_layer(self.image, temp_layer, None, 0)
+                    pdb.gimp_image_select_item(self.image, CHANNEL_OP_REPLACE, temp_layer)
+                    bounds = pdb.gimp_selection_bounds(self.image)
+                    pdb.gimp_selection_none(self.image)
+                    pdb.gimp_image_remove_layer(self.image, temp_layer)
+                    if not bounds[0]:
+                        print("Nessuna selezione per font_size=%d" % font_size)
+                        return False, 0
+                    content_height = bounds[4] - bounds[2]
+                    is_truncated = content_height >= inscribed_height * 0.90
+                    fits = content_height <= inscribed_height * fill_factor and not is_truncated
+                    print("text_fits_in_box: font_size=%d, content_height=%d, inscribed_height=%d, fill_factor=%f, is_truncated=%s, fits=%s" % 
+                          (font_size, content_height, inscribed_height, fill_factor, is_truncated, fits))
+                    return fits, content_height
+                except Exception as e:
+                    print("Errore in text_fits_in_box per font_size=%d: %s" % (font_size, str(e)))
+                    return False, 0
+
+            # Determina la percentuale di riempimento
+            num_lines = estimate_num_lines(text, reference_font_size, inscribed_width)
+            print("Numero di righe stimato: %d" % num_lines)
+            if num_lines <= 2:
+                fill_factor = 0.70  # Ridotto da 0.80
+            elif num_lines <= 4:
+                fill_factor = 0.68  # Ridotto da 0.78
+            else:
+                fill_factor = 0.66  # Ridotto da 0.76
+            print("Percentuale di riempimento: %f" % fill_factor)
+
+            # Calcola la stima iniziale della dimensione del font
+            estimated_font_size = int((inscribed_height * fill_factor) / (num_lines * interlinea_factor))
+            estimated_font_size = max(min_font_size, min(max_font_size, estimated_font_size))
+            print("Dimensione font stimata iniziale: %d" % estimated_font_size)
+
+            # Ricerca binaria per affinare la dimensione del font
+            low = max(min_font_size, estimated_font_size - 5)
+            high = min(max_font_size, estimated_font_size + 5)
+            best_font_size = min_font_size
+            best_height = 0
+
+            while low <= high:
+                mid = (low + high) // 2
+                fits, content_height = text_fits_in_box(text_layer, mid)
+                print("Ricerca binaria: font_size=%d, fits=%s, content_height=%d, low=%d, high=%d" % 
+                      (mid, fits, content_height, low, high))
+                if fits and content_height > 0:
+                    best_font_size = mid
+                    best_height = content_height
+                    low = mid + 1
+                else:
+                    high = mid - 1
+
+            # Imposta la dimensione del font ottimale
+            try:
+                pdb.gimp_text_layer_set_font_size(text_layer, best_font_size, PIXELS)
+                fits, final_height = text_fits_in_box(text_layer, best_font_size)
+                print("Dimensione font finale: %d, altezza finale=%d, fits=%s" % (best_font_size, final_height, fits))
+            except Exception as e:
+                print("Errore nell'impostazione della dimensione del font: %s" % str(e))
+                tkMessageBox.showerror("Errore", "Errore nell'impostazione della dimensione del font: %s" % str(e))
+                self.destroy()
+                return
+
+            # Avviso se il testo è troppo alto o il font è troppo piccolo
+            if final_height > inscribed_height or best_font_size == min_font_size:
+                print("Avviso: Il testo potrebbe essere troppo lungo per il box o il font size è minimo")
+                tkMessageBox.showwarning("Avviso", "Il testo potrebbe non adattarsi correttamente. "
+                                                  "Considera di ridurre il testo o il font size è troppo piccolo.")
+
+            # Inserisci il layer di testo nel gruppo
             try:
                 layer_group = pdb.gimp_item_get_parent(layer_globe_text)
                 if layer_group and pdb.gimp_item_is_valid(layer_group):
@@ -1135,20 +1408,21 @@ class TranslationGUI(tk.Tk):
                     pdb.gimp_image_reorder_item(self.image, text_layer, None, position)
                     print("Layer di testo inserito senza gruppo, posizione: %d" % position)
             except Exception as e:
-                print("Errore nell'inserimento del layer di testo nel gruppo: %s" % str(e))
-                tkMessageBox.showerror("Errore", "Errore nell'inserimento del layer di testo nel gruppo: %s" % str(e))
+                print("Errore nell'inserimento del layer di testo: %s" % str(e))
+                tkMessageBox.showerror("Errore", "Errore nell'inserimento del layer di testo: %s" % str(e))
                 self.destroy()
                 return
 
+            # Ancoraggio automatico
             if self.auto_anchor_var.get():
-                print("Ancoraggio automatico del layer di testo...")
+                print("Ancoraggio del layer di testo...")
                 try:
                     pdb.gimp_image_set_active_layer(self.image, layer_globe_text)
                     merged_layer = pdb.gimp_image_merge_down(self.image, text_layer, EXPAND_AS_NECESSARY)
                     merged_layer.name = self.unique_layer_name
                     print("Layer di testo unito: %s" % merged_layer.name)
                 except Exception as e:
-                    print("Errore in apply_to_gimp durante l'ancoraggio: %s" % str(e))
+                    print("Errore durante l'ancoraggio: %s" % str(e))
                     tkMessageBox.showerror("Errore", "Errore durante l'ancoraggio del testo: %s" % str(e))
                     self.destroy()
                     return
