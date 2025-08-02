@@ -86,6 +86,16 @@ ITA
 
 ![alt text](https://github.com/MoonDragon-MD/ComicBubbleOCR/blob/main/img/3.jpg?raw=true)
 
+ITA V.1.2
+
+![alt text](https://github.com/MoonDragon-MD/ComicBubbleOCR/blob/main/img/4.jpg?raw=true)
+
+ENG V.1.2
+
+![alt text](https://github.com/MoonDragon-MD/ComicBubbleOCR/blob/main/img/5.jpg?raw=true)
+
+The comic strip featuring a witch and a cat is David Revoy's fantastic open-source work [“Pepper & Carrot.”](https://www.peppercarrot.com/)
+
 ### Info
 
 Remember to always start selecting from the image layer (original imported image) if you want to translate more than one bubble on the same image, otherwise it will obviously find nothing.
