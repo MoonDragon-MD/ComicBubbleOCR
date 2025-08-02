@@ -21,7 +21,7 @@ locale.setlocale(locale.LC_ALL, 'C')  # Forza la localizzazione inglese per evit
 
 
 # ComicBubbleOCR by MoonDragon
-# V. 1.1 rev.17
+# V. 1.2 rev.2
 # Sito web: https://github.com/MoonDragon-MD/ComicBubbleOCR
 
 ## Dipendenze
@@ -96,7 +96,11 @@ DEFAULT_SETTINGS = {
     "invert_colors_var": "False",
     "lowercase_translate_var": "False",
     "translator_var": "libre",
-    "auto_anchor_var": "False"
+    "auto_anchor_var": "False",
+    "custom_font_var": "False",
+    "custom_font_name": "Sans",
+    "custom_color_var": "False",
+    "custom_color_code": "000000"
 }
 
 # Opzioni di preelaborazione del testo
@@ -128,6 +132,8 @@ def load_settings():
         settings['invert_colors_var'] = config.getboolean('Settings', 'invert_colors_var')
         settings['lowercase_translate_var'] = config.getboolean('Settings', 'lowercase_translate_var')
         settings['auto_anchor_var'] = config.getboolean('Settings', 'auto_anchor_var')
+        settings['custom_font_var'] = config.getboolean('Settings', 'custom_font_var')  # Font
+        settings['custom_color_var'] = config.getboolean('Settings', 'custom_color_var')  # Colore font
         print("Impostazioni caricate da %s: %s" % (CONFIG_FILE, settings))
         return settings
     except Exception as e:
@@ -146,7 +152,11 @@ def save_settings(settings):
         'invert_colors_var': str(settings['invert_colors_var']),
         'lowercase_translate_var': str(settings['lowercase_translate_var']),
         'translator_var': settings['translator_var'],
-        'auto_anchor_var': str(settings['auto_anchor_var'])
+        'auto_anchor_var': str(settings['auto_anchor_var']),
+        'custom_font_var': str(settings['custom_font_var']),        
+        'custom_font_name': settings['custom_font_name'],          # Font
+        'custom_color_var': str(settings['custom_color_var']),    
+        'custom_color_code': settings['custom_color_code']         # Colore
     }
     try:
         with open(CONFIG_FILE, 'w') as configfile:
@@ -960,7 +970,7 @@ class TranslationGUI(tk.Tk):
     def __init__(self, image, drawable):
         tk.Tk.__init__(self)
         self.title("ComicBubbleOCR")
-        self.geometry("600x775")
+        self.geometry("600x867")
         self.image = image
         self.drawable = drawable
         self.translated_text = ""
@@ -1011,6 +1021,22 @@ class TranslationGUI(tk.Tk):
         tk.Radiobutton(self, text="LibreTranslate", variable=self.translator_var, value="libre").pack()
         tk.Radiobutton(self, text="Google Translate (Al momento non funziona)", variable=self.translator_var, value="google").pack()
 
+        # Font personalizzato
+        self.custom_font_var = tk.BooleanVar(value=self.settings["custom_font_var"])
+        tk.Checkbutton(self, text="Usa font personalizzato", variable=self.custom_font_var).pack()
+        self.custom_font_entry = tk.Entry(self, state='normal' if self.custom_font_var.get() else 'disabled')
+        self.custom_font_entry.insert(0, self.settings["custom_font_name"])
+        self.custom_font_entry.pack()
+        self.custom_font_var.trace('w', self.toggle_custom_font_entry)
+
+        # Colore font personalizzato
+        self.custom_color_var = tk.BooleanVar(value=self.settings["custom_color_var"])
+        tk.Checkbutton(self, text="Usa colore personalizzato #HTML per font", variable=self.custom_color_var).pack()
+        self.custom_color_entry = tk.Entry(self, state='normal' if self.custom_color_var.get() else 'disabled')
+        self.custom_color_entry.insert(0, self.settings["custom_color_code"])
+        self.custom_color_entry.pack()
+        self.custom_color_var.trace('w', self.toggle_custom_color_entry)
+        
         self.auto_anchor_var = tk.BooleanVar(value=self.settings["auto_anchor_var"])
         tk.Checkbutton(self, text="Ancora automaticamente il testo", variable=self.auto_anchor_var).pack()
 
@@ -1031,7 +1057,7 @@ class TranslationGUI(tk.Tk):
         self.save_button = tk.Button(self, text="Applica a GIMP", command=self.apply_to_gimp)
         self.save_button.pack()
 
-        tk.Label(self, text="V. 1.1 rev.17 by MoonDragon").pack()
+        tk.Label(self, text="V. 1.2 rev.2 by MoonDragon").pack()
 
     def update_psm_selection(self, value):
         for opt in psm_options:
@@ -1044,6 +1070,18 @@ class TranslationGUI(tk.Tk):
             if opt[1] == value:
                 self.preprocess_var.set(opt[0])
                 break
+                
+    def toggle_custom_font_entry(self, *args):
+        if self.custom_font_var.get():
+            self.custom_font_entry.config(state='normal')
+        else:
+            self.custom_font_entry.config(state='disabled')
+
+    def toggle_custom_color_entry(self, *args):
+        if self.custom_color_var.get():
+            self.custom_color_entry.config(state='normal')
+        else:
+            self.custom_color_entry.config(state='disabled')
 
     def retranslate_text(self):
         ocr_text = self.ocr_text_display.get(1.0, tk.END).strip()
@@ -1167,7 +1205,11 @@ class TranslationGUI(tk.Tk):
                 "invert_colors_var": self.invert_colors_var.get(),
                 "lowercase_translate_var": self.lowercase_translate_var.get(),
                 "translator_var": self.translator_var.get(),
-                "auto_anchor_var": self.auto_anchor_var.get()
+                "auto_anchor_var": self.auto_anchor_var.get(),
+                "custom_font_var": self.custom_font_var.get(),              
+                "custom_font_name": self.custom_font_entry.get().strip(),  
+                "custom_color_var": self.custom_color_var.get(),           
+                "custom_color_code": self.custom_color_entry.get().strip().lstrip('#')  
             })
             save_settings(self.settings)
 
@@ -1219,12 +1261,48 @@ class TranslationGUI(tk.Tk):
             print("Testo da applicare: '%s'" % text)
 
             # Parametri del font
-            font = "Sans"  # Font principale
+            default_font = "Sans"  # Font predefinito
+            font = default_font
             fallback_font = "Arial"  # Font di fallback
             min_font_size = 6
             max_font_size = 40  # Ridotto per convergere su valori realistici
             reference_font_size = 10  # Font size di riferimento per stime
             interlinea_factor = 1.3  # Valore fisso calibrato per Sans
+            
+            # Gestione font personalizzato
+            if self.custom_font_var.get():
+                custom_font = self.custom_font_entry.get().strip()
+                if custom_font:
+                    font = custom_font
+                    try:
+                        fonts = pdb.gimp_fonts_get_list(font)
+                        if not fonts or not any(font.lower() in f.lower() for f in fonts[1]):
+                            print("Font '%s' non trovato, uso default '%s'" % (font, default_font))
+                            font = default_font
+                    except Exception as e:
+                        print("Errore nella verifica del font '%s': %s, uso default '%s'" % (font, str(e), default_font))
+                        font = default_font
+                else:
+                    print("Nessun font personalizzato specificato, uso default '%s'" % default_font)
+                    font = default_font
+            print("Font selezionato: %s" % font)
+
+            # Gestione colore font personalizzato (Se il checkbox non è selezionato, self.text_color rimane quello determinato da export_image_selectioned)
+            if self.custom_color_var.get():
+                color_code = self.custom_color_entry.get().strip().lstrip('#')
+                if len(color_code) == 6 and all(c in '0123456789abcdefABCDEF' for c in color_code):
+                    try:
+                        r = int(color_code[0:2], 16)
+                        g = int(color_code[2:4], 16)
+                        b = int(color_code[4:6], 16)
+                        self.text_color = (r, g, b)
+                        print("Colore personalizzato applicato: %s" % str(self.text_color))
+                    except ValueError:
+                        print("Codice colore non valido: '%s', uso colore predefinito" % color_code)
+                        self.text_color = (0, 0, 0)  # Colore predefinito: nero
+                else:
+                    print("Codice colore non valido: '%s', uso colore predefinito" % color_code)
+                    self.text_color = (0, 0, 0)
 
             # Verifica disponibilità del font
             try:
