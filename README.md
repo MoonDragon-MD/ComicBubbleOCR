@@ -1,6 +1,6 @@
 Plugin to translate comics via OCR and LibreTranslate (full offline) for GIMP 2.10.* (python 2.7)
-System to compute background and text color, auto centering and auto reduce text on bubble.
-Various options and auto retries if text is not detected
+System to compute background and text color, auto centering and auto reduce/enlarge text on bubble.
+Various options and auto retries if text is not detected, since version 1.2, it has been possible to set custom fonts and font colors.
 
 I took a cue from the windows project: [BubbleOCR](https://github.com/snakeotakon/BubbleOCR)
 
