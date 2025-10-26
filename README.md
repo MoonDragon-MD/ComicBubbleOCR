@@ -44,8 +44,9 @@ Put ComicBubbleOCR.py in the folder:
  ~/.config/GIMP/2.10/plug-ins/
  ```
 Give the file execution permissions
-
+```
 chmod +x ~/.config/GIMP/2.10/plug-ins/ComicBubbleOCR.py
+```
 
 ### Usage
 
